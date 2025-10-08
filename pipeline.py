@@ -3,7 +3,7 @@ Main document processing pipeline.
 Uses utils and config. Returns normalized dictionary:
 {
   "ai_summary": str,
-  "categories": [ {"category": str, "bullets": [ { "text", "risk", "rationale", "provenance" }, ... ] }, ... ],
+  "categories": [ {"category": str, "category_summary": str, "bullets": [ { "text", "risk", "rationale", "provenance" }, ... ] }, ... ],
   "raw_text": str
 }
 """
@@ -16,33 +16,28 @@ from config import DEFAULT_KEYWORDS
 # -------------------------
 # 🔹 Summarizer setup
 # -------------------------
-# Load HuggingFace summarization model once
 summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
-def summarize_text(text: str, max_len=60) -> str:
-    """
-    Run summarization on a short text using a lightweight model.
-    """
+def summarize_text(text: str, max_len=80, min_len=20) -> str:
+    """Run summarization on text using a lightweight model."""
     text = text.strip()
-    if not text:
-        return ""
+    if len(text) < 40: # Don't summarize very short text
+        return text
     try:
-        res = summarizer(text[:2000], max_length=max_len, min_length=20, do_sample=False)
+        # Limit input length to avoid overwhelming the model
+        res = summarizer(text[:2048], max_length=max_len, min_length=min_len, do_sample=False)
         return res[0]["summary_text"].strip()
     except Exception:
-        # Fallback: show truncated text if summarizer fails
-        return text[:150] + "..."
+        return text[:250] + "..." # Fallback
 
 # -------------------------
-# 🔹 Main pipeline
+# 🔹 Main pipeline (Optimized)
 # -------------------------
 def process_document(text: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Process the provided text and return a structured summary dictionary.
-    """
+    """Process the provided text and return a structured summary dictionary."""
     keywords = config.get("keywords", DEFAULT_KEYWORDS)
     categories = config.get("categories", [])
-    max_bullets = int(config.get("max_bullets_per_category", 6))
+    max_bullets = int(config.get("max_bullets_per_category", 5))
 
     sents = sentences(text)
     per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in categories}
@@ -55,54 +50,58 @@ def process_document(text: str, config: Dict[str, Any]) -> Dict[str, Any]:
         score, triggers = risk_for_sentence(s)
         band_label = band(score)
 
-        # Try to preserve any [Page X, Line Y] tag if present
         if s.startswith("[Page"):
-            location = s.split("]")[0].strip("[")  # e.g. "Page 2, Line 15"
+            location = s.split("]")[0].strip("[")
         else:
             location = f"line {idx}"
+        
+        # Remove the location tag for cleaner processing
+        clean_sentence = s.split("]", 1)[-1].strip()
 
         for cat in cats:
-            if cat not in per_cat:
-                continue
-            per_cat[cat].append({
-                "text": s,
-                "risk": band_label,
-                "rationale": triggers,
-                "provenance": provenance_dict("", location),
-                "score": score
-            })
+            if cat in per_cat:
+                per_cat[cat].append({
+                    "text": clean_sentence,
+                    "risk": band_label,
+                    "rationale": triggers,
+                    "provenance": provenance_dict(s, location),
+                    "score": score
+                })
 
-    # Category summarization
+    # Category-level summarization (Optimized to reduce AI calls)
     categories_out: List[Dict[str, Any]] = []
+    all_top_clauses_text = []
+
     for cat in categories:
-        items = sorted(per_cat.get(cat, []), key=lambda x: (-x["score"], x["text"]))
+        # Sort clauses by risk score to find the most important ones
+        items = sorted(per_cat.get(cat, []), key=lambda x: -x["score"])
+        
+        # Get unique top clauses to summarize
         seen_texts = set()
-        bullets = []
+        top_clauses = []
         for item in items:
-            if item["text"] in seen_texts:
-                continue
-            seen_texts.add(item["text"])
-
-            # 🔹 Summarize each bullet instead of showing full sentence
-            short_summary = summarize_text(item["text"], max_len=50)
-
-            bullets.append({
-                "text": short_summary,
-                "risk": item["risk"],
-                "rationale": item["rationale"],
-                "provenance": item["provenance"],
-            })
-            if len(bullets) >= max_bullets:
+            if item["text"] not in seen_texts:
+                top_clauses.append(item)
+                seen_texts.add(item["text"])
+            if len(top_clauses) >= max_bullets:
                 break
+        
+        category_summary = ""
+        if top_clauses:
+            # Join the text of the most important clauses for a single summary call
+            text_for_summary = " ".join([c["text"] for c in top_clauses])
+            category_summary = summarize_text(text_for_summary, max_len=60, min_len=15)
+            all_top_clauses_text.append(text_for_summary)
 
-        categories_out.append({"category": cat, "bullets": bullets})
+        categories_out.append({
+            "category": cat,
+            "category_summary": category_summary,
+            "bullets": top_clauses  # Bullets are now the full, original clauses
+        })
 
-    # 🔹 Global concise summary (2–4 lines)
-    # Join top sentences or summaries from categories and re-summarize
-    all_text_for_global = " ".join(
-        [b["text"] for c in categories_out for b in c["bullets"][:2]]
-    )
-    ai_summary = summarize_text(all_text_for_global, max_len=80)
+    # Global concise summary (2–4 lines) based on all top clauses
+    global_summary_text = " ".join(all_top_clauses_text)
+    ai_summary = summarize_text(global_summary_text, max_len=100, min_len=30)
 
     return {
         "ai_summary": ai_summary,
