@@ -1,106 +1,81 @@
 """
-Main document processing pipeline (v0.5).
-Calculates category-level risk and deterministically sets clause counts.
+Main document processing pipeline (v1.1 – Final).
+- Uses improved trigger logic from utils.
+- Ensures every clause has a clear rationale.
 """
 from transformers import pipeline
 from typing import Dict, Any, List
-from utils import sentences, tag_sentence, risk_for_sentence, band, provenance_dict
+from utils import sentences, tag_sentence, risk_for_sentence, band, provenance_dict, clean_text
 from config import DEFAULT_KEYWORDS
 
-# -------------------------
-# 🔹 Summarizer setup
-# -------------------------
-summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
-def summarize_text(text: str, max_len=80, min_len=20) -> str:
-    """Run summarization on text using a lightweight model."""
+def summarize_text_for_risk(category: str, text: str) -> str:
+    """Summarize a category section focusing on user risk."""
     text = text.strip()
-    if len(text) < 40:
-        return text
+    if len(text) < 50: return f"This section on {category.lower()} may contain important clauses."
+    prompt = (f"Summarize how the following clauses about {category} could impact user rights, privacy, or finances:\n\n{text[:3000]}")
     try:
-        res = summarizer(text[:2048], max_length=max_len, min_length=min_len, do_sample=False)
+        res = summarizer(prompt, max_length=120, min_length=30, do_sample=False)
         return res[0]["summary_text"].strip()
-    except Exception:
-        return text[:250] + "..."
+    except Exception: return f"Summary not available for {category.lower()}."
 
-# -------------------------
-# 🔹 Main pipeline (Optimized)
-# -------------------------
 def process_document(text_pages: Dict[int, str], config: Dict[str, Any]) -> Dict[str, Any]:
-    """Process text (split by page) and return a structured summary."""
+    """Main document analysis pipeline."""
     keywords = config.get("keywords", DEFAULT_KEYWORDS)
-    categories = config.get("categories", [])
-    
+    categories = list(keywords.keys())
     per_cat: Dict[str, List[Dict[str, Any]]] = {c: [] for c in categories}
-    raw_text_full = ""
+    full_cleaned_text = ""
 
-    # Sentence-level tagging, now aware of page numbers
     for page_num, page_text in text_pages.items():
-        raw_text_full += f"\n--- Page {page_num} ---\n{page_text}"
-        sents = sentences(page_text)
+        cleaned_page_text = clean_text(page_text or "")
+        full_cleaned_text += f"\n--- Page {page_num} ---\n{cleaned_page_text}"
+        sents = sentences(cleaned_page_text)
+
         for s in sents:
-            cats = tag_sentence(s, keywords)
-            if not cats:
-                continue
+            # ✅ Get the dictionary of matched categories and their specific trigger keywords
+            matched_cats = tag_sentence(s, keywords)
+            if not matched_cats: continue
             
-            score, triggers = risk_for_sentence(s)
-            band_label = band(score)
-            location = f"Page {page_num}"
+            score, _ = risk_for_sentence(s) # Score is still calculated from high-risk words
+            
+            for cat, triggers in matched_cats.items():
+                per_cat[cat].append({
+                    "text": s,
+                    "risk": band(score),
+                    "rationale": triggers, # ✅ The rationale is now the keyword that categorized the clause
+                    "provenance": provenance_dict(s, f"Page {page_num}"),
+                    "score": score
+                })
 
-            for cat in cats:
-                if cat in per_cat:
-                    per_cat[cat].append({
-                        "text": s,
-                        "risk": band_label,
-                        "rationale": triggers,
-                        "provenance": provenance_dict(s, location),
-                        "score": score
-                    })
-
-    # Category-level summarization and risk calculation
     categories_out: List[Dict[str, Any]] = []
-    all_top_clauses_text = []
-
+    all_top_clauses = []
     for cat in categories:
         items = sorted(per_cat.get(cat, []), key=lambda x: -x["score"])
-        
-        # ✅ Deterministically set max clauses based on findings
-        # Show more clauses for categories with more findings, up to a max of 7
-        max_bullets = min(7, 2 + len(items) // 4)
+        if not items: continue
 
-        seen_texts = set()
-        top_clauses = []
-        for item in items:
-            if item["text"] not in seen_texts:
-                top_clauses.append(item)
-                seen_texts.add(item["text"])
-            if len(top_clauses) >= max_bullets:
-                break
+        # De-duplicate clauses to avoid repetition
+        unique_clauses = list({item['text']: item for item in items}.values())
+        top_clauses = unique_clauses[:min(7, len(unique_clauses))]
         
-        category_summary = ""
-        category_risk = "Low" # Default risk
+        text_for_summary = " ".join([c["text"] for c in top_clauses])
+        category_summary = summarize_text_for_risk(cat, text_for_summary)
+        all_top_clauses.extend(top_clauses)
+        
         if top_clauses:
-            text_for_summary = " ".join([c["text"] for c in top_clauses])
-            category_summary = summarize_text(text_for_summary, max_len=60, min_len=15)
-            all_top_clauses_text.append(text_for_summary)
+            category_risk = max([c["risk"] for c in top_clauses], key=lambda r: {"High":3,"Medium":2,"Low":1}[r])
+            categories_out.append({
+                "category": cat,
+                "category_summary": category_summary,
+                "category_risk": category_risk,
+                "bullets": top_clauses
+            })
 
-            # ✅ Calculate overall category risk (highest risk of its clauses)
-            scores = {"High": 3, "Medium": 2, "Low": 1}
-            top_risk_in_cat = max([c["risk"] for c in top_clauses], key=lambda r: scores[r])
-            category_risk = top_risk_in_cat
-
-        categories_out.append({
-            "category": cat,
-            "category_summary": category_summary,
-            "category_risk": category_risk,
-            "bullets": top_clauses
-        })
-
-    global_summary_text = " ".join(all_top_clauses_text)
-    ai_summary = summarize_text(global_summary_text, max_len=100, min_len=30)
+    unique_all_top = list({item['text']: item for item in all_top_clauses}.values())
+    ai_summary = summarize_text_for_risk("the overall document", " ".join([c['text'] for c in unique_all_top]))
 
     return {
         "ai_summary": ai_summary,
         "categories": categories_out,
-        "raw_text": raw_text_full.strip()
+        "raw_text": full_cleaned_text.strip()
     }
