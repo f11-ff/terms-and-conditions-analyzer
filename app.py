@@ -1,30 +1,54 @@
 """
-Streamlit frontend for Terms & Conditions Analyzer (v1.2 Final).
-- Adds trigger highlighting in UI and PDF for better readability.
-- Uses updated pipeline with improved summary prompts.
+Streamlit frontend for Terms & Conditions Analyzer (v1.4 Scoped Analysis).
+- Fixed bug to ensure only relevant keywords are used for the selected doc type.
 """
+
 import io
 import json
-import re
 import sqlite3
-from typing import Dict, Any, List
+from typing import Dict, Any
 import streamlit as st
 
 try:
     import pdfplumber
-except Exception: pdfplumber = None
+except Exception:
+    pdfplumber = None
+
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
     from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.colors import red, orange, grey
-except Exception: SimpleDocTemplate = None
+except Exception:
+    SimpleDocTemplate = None
 
 from pipeline import process_document
 from config import DEFAULT_KEYWORDS
 
-# ---------------- Helper Functions ---------------- #
+# ---------------- App Configuration ---------------- #
+APP_VERSION = "v1.4 Scoped Analysis"
+
+CATEGORY_SETS = {
+    "Software ToS": [
+        "Data Collection", "Data Sharing", "User Rights", "Restrictions",
+        "Termination", "Refunds & Billing", "Dispute Resolution", "Liability & Warranty",
+        "User Content Ownership", "Third-party Integration", "Security & Breach Responsibility"
+    ],
+    "Rental / Lease Agreement": [
+        "Lease Terms & Duration", "Financials (Rent, Fees, Deposit)", 
+        "Responsibilities & Rules", "Lease Termination"
+    ],
+    "Insurance Policy": [
+        "Coverage & Limits", "Exclusions (What's Not Covered)", 
+        "Premiums & Payments", "Claims & Procedures"
+    ],
+    "Loan Agreement": [
+        "Loan Terms (Principal, Interest)", "Repayment Schedule", 
+        "Fees & Penalties", "Collateral & Default"
+    ],
+}
+
+# ---------------- Helper Functions (Unchanged) ---------------- #
 def _extract_text_from_pdf(file_bytes: bytes) -> Dict[int, str]:
     if not pdfplumber:
         st.error("`pdfplumber` is not installed. Please run `pip install pdfplumber`.")
@@ -33,21 +57,9 @@ def _extract_text_from_pdf(file_bytes: bytes) -> Dict[int, str]:
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for i, page in enumerate(pdf.pages, start=1):
             text = page.extract_text()
-            if text and text.strip(): pages[i] = text
+            if text and text.strip():
+                pages[i] = text
     return pages
-
-def _highlight_triggers(text: str, triggers: List[str], is_pdf: bool = False) -> str:
-    """✅ Helper function to highlight trigger keywords in text."""
-    # Sort triggers by length, longest first, to avoid partial matches (e.g., matching "share" before "share data")
-    sorted_triggers = sorted(triggers, key=len, reverse=True)
-    for trigger in sorted_triggers:
-        # Use regex to find whole words to avoid matching parts of words
-        pattern = re.compile(f"\\b({re.escape(trigger)})\\b", re.IGNORECASE)
-        if is_pdf:
-            text = pattern.sub(r"<b>\1</b>", text)
-        else:
-            text = pattern.sub(r"`\1`", text) # Use markdown code formatting for highlighting
-    return text
 
 def _format_analysis_for_pdf(result: Dict[str, Any]) -> bytes:
     if not SimpleDocTemplate:
@@ -68,30 +80,32 @@ def _format_analysis_for_pdf(result: Dict[str, Any]) -> bytes:
         story.append(Paragraph(cat.get("category_summary", "No summary available."), styles["Normal"]))
         story.append(Spacer(1, 0.1 * inch))
         for bullet in cat.get("bullets", []):
-            # ✅ Highlight triggers in the PDF text
-            highlighted_text = _highlight_triggers(bullet.get('text'), bullet.get('rationale', []), is_pdf=True)
-            text = f"- ({bullet.get('risk')}) {highlighted_text}"
+            text = f"- ({bullet.get('risk')}) {bullet.get('text')}"
             story.append(Paragraph(text, styles["Normal"]))
             loc = bullet["provenance"].get("location", "Unknown")
-            story.append(Paragraph(f"<font size=8 color='grey'>📍 Location: {loc}</font>", styles["Normal"]))
+            triggers = ", ".join(bullet.get("rationale", []))
+            details_text = f"<font size=8 color='grey'>📍 Location: {loc} | 🤔 Triggers: {triggers}</font>"
+            story.append(Paragraph(details_text, styles["Normal"]))
             story.append(Spacer(1, 0.05 * inch))
         story.append(Spacer(1, 0.2 * inch))
     doc.build(story)
-    return buffer.getvalue()
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
 
-# (Database functions and UI setup are unchanged)
 def init_db():
     conn = sqlite3.connect("analyses.db")
     conn.execute("CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, doc_type TEXT, summary_json TEXT)")
     conn.commit()
     return conn
 
+# ---------------- UI ---------------- #
 st.set_page_config(page_title="Terms Analyzer", page_icon="⚖️", layout="wide")
 st.title("⚖️ Terms & Conditions Analyzer")
-# (Sidebar UI is unchanged)
+
 with st.sidebar:
     st.header("Settings")
-    selected_set = st.selectbox("Document Type", ["Software ToS"])
+    selected_set = st.selectbox("Document Type", list(CATEGORY_SETS.keys()))
     st.write("---")
     st.subheader("Past Analyses")
     conn = init_db()
@@ -102,7 +116,6 @@ with st.sidebar:
                 row = conn.execute("SELECT summary_json FROM documents WHERE id=?", (doc_id,)).fetchone()
                 st.session_state["result"] = json.loads(row[0]) if row else None
 
-# (Input section is unchanged)
 st.header("📥 Input Document")
 pasted = st.text_area("Paste text here", height=250)
 uploaded_pdf = st.file_uploader("Or upload a PDF", type=["pdf"])
@@ -113,10 +126,23 @@ if uploaded_pdf: text_pages = _extract_text_from_pdf(uploaded_pdf.getvalue())
 elif pasted.strip(): text_pages = {1: pasted.strip()}
 
 if run_btn:
-    if not text_pages: st.warning("Please provide text or upload a PDF.")
+    if not text_pages:
+        st.warning("Please provide text or upload a PDF.")
     else:
         with st.spinner("Analyzing document..."):
-            config = {"keywords": DEFAULT_KEYWORDS}
+            # ✅ FIX: Filter the keywords based on the selected document type
+            required_categories = CATEGORY_SETS[selected_set]
+            filtered_keywords = {
+                cat: DEFAULT_KEYWORDS[cat] 
+                for cat in required_categories 
+                if cat in DEFAULT_KEYWORDS
+            }
+            
+            config = {
+                "keywords": filtered_keywords,
+                "categories": required_categories
+            }
+            
             data = process_document(text_pages, config)
             st.session_state["result"] = data
             conn.execute("INSERT INTO documents (doc_type, summary_json) VALUES (?, ?)", (selected_set, json.dumps(data)))
@@ -136,12 +162,9 @@ if result:
             st.write(f"**Summary:** {category.get('category_summary')}")
             with st.expander("Show Key Clauses..."):
                 for bullet in category.get("bullets", []):
-                    # ✅ Highlight triggers in the Streamlit UI
-                    highlighted_text = _highlight_triggers(bullet.get('text'), bullet.get('rationale', []))
-                    st.markdown(f"**- ({bullet.get('risk')} Risk):** {highlighted_text}")
-                    st.markdown(f"<small style='color:#888'>📍 {bullet['provenance'].get('location')}</small>", unsafe_allow_html=True)
+                    st.markdown(f"**- ({bullet.get('risk')} Risk):** {bullet.get('text')}")
+                    st.markdown(f"<small style='color:#888'>📍 {bullet['provenance'].get('location')} | 🤔 Triggers: `{', '.join(bullet.get('rationale', []))}`</small>", unsafe_allow_html=True)
 
-    # (Search and Export tabs are functionally unchanged, but use the new functions)
     with tabs[1]:
         st.subheader("Search Full Text")
         query = st.text_input("Enter keyword to search in full text")
@@ -150,7 +173,13 @@ if result:
             matches = [line for line in cleaned_text.split('\n') if query.lower() in line.lower()]
             st.markdown(f"**Found {len(matches)} matches.**")
             st.code("\n".join(matches))
+
     with tabs[2]:
         st.subheader("Download Full PDF Report")
         pdf_data = _format_analysis_for_pdf(result)
-        st.download_button("📥 Download Report", data=pdf_data, file_name="terms_full_report.pdf", mime="application/pdf")
+        st.download_button(
+            "📥 Download Report",
+            data=pdf_data,
+            file_name="terms_full_report.pdf",
+            mime="application/pdf",
+        )
