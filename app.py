@@ -1,6 +1,5 @@
 """
-Streamlit frontend for Terms & Conditions Analyzer (v0.4 optimized).
-Uses pipeline.process_document and utils for text processing.
+Streamlit frontend for Terms & Conditions Analyzer (v0.5 UI Refresh).
 """
 
 import io
@@ -11,7 +10,6 @@ from typing import Dict, Any, Optional
 
 import streamlit as st
 
-# Optional PDF
 try:
     import PyPDF2
 except Exception:
@@ -20,14 +18,9 @@ except Exception:
 from pipeline import process_document
 from config import DEFAULT_KEYWORDS
 
-# -------------------------
 # App version
-# -------------------------
-APP_VERSION = "v0.4 optimized"
+APP_VERSION = "v0.5 UI Refresh"
 
-# -------------------------
-# Category sets
-# -------------------------
 CATEGORY_SETS = {
     "Software ToS": [
         "Data Collection", "Data Sharing", "User Rights", "Restrictions",
@@ -36,53 +29,58 @@ CATEGORY_SETS = {
 }
 
 # -------------------------
-# Utility functions for app
+# Utility Functions
 # -------------------------
-def _extract_text_from_pdf(file: bytes):
+def _extract_text_from_pdf(file_bytes: bytes) -> Dict[int, str]:
+    """Extracts text from a PDF, returning a dictionary of page_num: text."""
     if not PyPDF2:
-        st.error("PyPDF2 is not installed. Please install it to read PDFs.")
-        return ""
-    reader = PyPDF2.PdfReader(io.BytesIO(file))
-    pages = []
+        st.error("PyPDF2 is not installed. PDF processing is disabled.")
+        return {}
+    pages = {}
+    reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
     for i, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        lines = [f"[Page {i}] {line}" for line in text.splitlines() if line.strip()]
-        pages.append("\n".join(lines))
-    return "\n".join(pages)
+        text = page.extract_text()
+        if text and text.strip():
+            pages[i] = text
+    return pages
 
+def _format_analysis_for_export(result: Dict[str, Any]) -> str:
+    """Formats the analysis into a clean text/markdown string."""
+    lines = [f"# Analysis Summary\n"]
+    lines.append(f"## Overall AI Summary\n{result.get('ai_summary', 'N/A')}\n")
+    lines.append("## Key Clauses by Category\n")
+    
+    for cat in result.get("categories", []):
+        lines.append(f"### {cat.get('category')} (Risk: {cat.get('category_risk')})")
+        lines.append(f"**Summary:** {cat.get('category_summary', 'N/A')}\n")
+        for bullet in cat.get('bullets', []):
+            lines.append(f"- **({bullet.get('risk')} Risk):** {bullet.get('text')}")
+            lines.append(f"  - *Location:* {bullet['provenance'].get('location', 'Unknown')}")
+            lines.append(f"  - *Triggers:* {', '.join(bullet.get('rationale', []))}\n")
+    return "\n".join(lines)
 
-def _simple_sentences(text: str):
-    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-
-
-# -------------------------
-# SQLite persistence
-# -------------------------
+# (Database functions like init_db, save_analysis, etc. remain unchanged)
 def init_db():
     conn = sqlite3.connect("analyses.db")
     conn.execute("""CREATE TABLE IF NOT EXISTS documents
-                 (id INTEGER PRIMARY KEY, doc_type TEXT, raw_text TEXT, summary_json TEXT)""")
+                 (id INTEGER PRIMARY KEY, doc_type TEXT, summary_json TEXT)""")
     conn.commit()
     return conn
 
-
-def save_analysis(doc_type, raw_text, summary):
+def save_analysis(doc_type, summary):
     conn = init_db()
-    conn.execute("INSERT INTO documents (doc_type, raw_text, summary_json) VALUES (?, ?, ?)",
-                 (doc_type, raw_text, json.dumps(summary)))
+    conn.execute("INSERT INTO documents (doc_type, summary_json) VALUES (?, ?)",
+                 (doc_type, json.dumps(summary)))
     conn.commit()
-
 
 def load_past_analyses():
     conn = init_db()
     return conn.execute("SELECT id, doc_type FROM documents ORDER BY id DESC").fetchall()
 
-
 def load_analysis_by_id(doc_id: int):
     conn = init_db()
     row = conn.execute("SELECT summary_json FROM documents WHERE id=?", (doc_id,)).fetchone()
     return json.loads(row[0]) if row else None
-
 
 # -------------------------
 # Streamlit UI
@@ -94,8 +92,7 @@ with st.sidebar:
     st.header("Settings")
     st.markdown(f"**Version:** {APP_VERSION}")
     selected_set = st.selectbox("Document Type", list(CATEGORY_SETS.keys()))
-    max_bullets = st.slider("Max clauses per category", 2, 8, 4)
-    st.write("")
+    st.write("---")
     st.subheader("Past Analyses")
     past = load_past_analyses()
     if past:
@@ -109,72 +106,78 @@ uploaded_pdf = st.file_uploader("Or upload PDF", type=["pdf"])
 
 run_btn = st.button("▶ Run Analyzer")
 
-text = ""
+text_pages = {}
 if uploaded_pdf:
-    text = _extract_text_from_pdf(uploaded_pdf.getvalue())
+    text_pages = _extract_text_from_pdf(uploaded_pdf.getvalue())
 elif pasted and pasted.strip():
-    text = pasted.strip()
+    text_pages = {1: pasted.strip()} # Treat pasted text as a single page
 
 if run_btn:
-    if not text:
+    if not text_pages:
         st.warning("Please upload a PDF or paste some text.")
     else:
         with st.spinner("Processing document… This may take a moment."):
-            config = {
-                "categories": CATEGORY_SETS[selected_set],
-                "keywords": DEFAULT_KEYWORDS,
-                "max_bullets_per_category": max_bullets
-            }
+            config = {"categories": CATEGORY_SETS[selected_set], "keywords": DEFAULT_KEYWORDS}
             try:
-                data = process_document(text, config)
+                data = process_document(text_pages, config)
                 st.session_state["result"] = data
-                save_analysis(selected_set, text, data)
+                save_analysis(selected_set, data)
             except Exception as e:
                 st.error(f"An error occurred in the pipeline: {e}")
 
 result: Optional[Dict[str, Any]] = st.session_state.get("result")
 if result:
-    tabs = st.tabs(["Summary", "Clauses/Search", "JSON Output"])
+    tabs = st.tabs(["📊 Summary", "📄 Clauses/Search", "📥 Export"])
 
     with tabs[0]:
         st.subheader("Overall AI Summary")
         st.info(result.get("ai_summary", "No overall summary could be generated."))
 
-        st.subheader("Key Clauses by Category")
-        for category_summary in result.get("categories", []):
-            cat_name = category_summary.get('category', 'Unnamed')
-            with st.expander(f"**{cat_name}**"):
-                st.success(f"**Category Summary:** {category_summary.get('category_summary', 'N/A')}")
-                
-                # Display the full original clauses as bullets
-                for bullet in category_summary.get("bullets", []):
-                    risk_color = "red" if bullet.get('risk') == "High" else "orange" if bullet.get('risk') == "Medium" else "green"
+        st.subheader("Analysis by Category")
+        for category in result.get("categories", []):
+            cat_name = category.get('category', 'Unnamed')
+            cat_risk = category.get('category_risk', 'Low')
+            risk_color = "red" if cat_risk == "High" else "orange" if cat_risk == "Medium" else "green"
+
+            st.markdown(
+                f"<h3 style='color: {risk_color};'>{cat_name} (Overall Risk: {cat_risk})</h3>",
+                unsafe_allow_html=True
+            )
+            st.write(f"**AI Summary:** {category.get('category_summary', 'N/A')}")
+            
+            with st.expander("Show Key Clauses..."):
+                bullets = category.get("bullets", [])
+                if not bullets:
+                    st.write("No specific clauses were flagged in this category.")
+                for bullet in bullets:
+                    b_risk = bullet.get('risk', 'Low')
+                    b_risk_color = "red" if b_risk == "High" else "orange" if b_risk == "Medium" else "grey"
+                    
+                    st.markdown(f"**- ({b_risk} Risk):** {bullet.get('text')}")
                     st.markdown(
-                        f"<p style='color:{risk_color}; margin-bottom: 2px;'><b>{bullet.get('risk')} Risk Clause:</b></p>",
+                        f"<small style='color: #888;'>📍 Location: {bullet['provenance'].get('location', 'Unknown')} | "
+                        f"🤔 Triggers: `{', '.join(bullet.get('rationale', []))}`</small>",
                         unsafe_allow_html=True
                     )
-                    st.markdown(f"> {bullet.get('text')}")
-
-                    # Enhanced details section
-                    with st.expander("Details"):
-                        prov = bullet.get("provenance", {})
-                        rationale = bullet.get("rationale", [])
-                        st.write(f"📍 **Location:** {prov.get('location', 'Unknown')}")
-                        st.write(f"🤔 **Risk Rationale:** Triggered by keyword(s) - `{', '.join(rationale)}`")
+                    st.write("") # Spacer
 
     with tabs[1]:
-        st.subheader("Search & Highlight Clauses")
-        search_query = st.text_input("Enter keyword to find relevant clauses")
+        st.subheader("Search Full Text")
+        search_query = st.text_input("Enter keyword to find in the original text")
         if search_query:
-            sentences = _simple_sentences(result.get("raw_text", ""))
-            matches = [s for s in sentences if search_query.lower() in s.lower()]
-            st.markdown(f"**Found {len(matches)} matches.**")
-            for s in matches:
-                st.info(s)
+            # Simple search through the raw text
+            matches = [line for line in result.get("raw_text", "").split('\n') if search_query.lower() in line.lower()]
+            st.markdown(f"**Found {len(matches)} matching lines.**")
+            st.code("\n".join(matches), language=None)
 
     with tabs[2]:
-        st.subheader("Raw JSON Output")
-        st.json(result)
-
+        st.subheader("Download Report")
+        report_text = _format_analysis_for_export(result)
+        st.download_button(
+            "Download Analysis as Text File",
+            data=report_text,
+            file_name="analysis_summary.txt",
+            mime="text/plain"
+        )
 else:
     st.info("Paste text or upload a document, then click **Run Analyzer**.")
