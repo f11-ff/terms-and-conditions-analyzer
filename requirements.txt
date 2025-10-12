@@ -1,0 +1,8 @@
+streamlit
+pdfplumber
+reportlab
+transformers
+torch
+nltk
+requests
+sentencepiece
