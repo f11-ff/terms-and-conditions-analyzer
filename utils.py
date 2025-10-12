@@ -1,9 +1,10 @@
+# utils.py
+
 """
 Utility helper functions for text processing and risk tagging.
 """
 import re
 from typing import List, Tuple, Dict, Any
-from config import DEFAULT_KEYWORDS, RISK_SCORES
 
 def clean_text(text: str) -> str:
     """Clean and normalize extracted text."""
@@ -18,9 +19,8 @@ def sentences(text: str) -> List[str]:
     """Split text into sentences."""
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
 
-def tag_sentence(sentence: str, keywords: Dict[str, List[str]] = None) -> Dict[str, List[str]]:
-    """✅ Tags a sentence and returns the specific keywords that were matched for each category."""
-    if keywords is None: keywords = DEFAULT_KEYWORDS
+def tag_sentence(sentence: str, keywords: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    """Tags a sentence and returns the specific keywords that were matched for each category."""
     s_lower = sentence.lower()
     hits = {}
     for cat, kws in keywords.items():
@@ -29,12 +29,12 @@ def tag_sentence(sentence: str, keywords: Dict[str, List[str]] = None) -> Dict[s
             hits[cat] = matched_kws
     return hits
 
-def risk_for_sentence(sentence: str) -> Tuple[int, List[str]]:
+def risk_for_sentence(sentence: str, risk_scores: Dict[str, int]) -> Tuple[int, List[str]]:
     """Compute risk score and high-risk triggers (for scoring only)."""
     s_lower = sentence.lower()
     score = 0
     risk_triggers = []
-    for kw, pts in RISK_SCORES.items():
+    for kw, pts in risk_scores.items():
         if kw in s_lower:
             score += pts
             risk_triggers.append(kw)
