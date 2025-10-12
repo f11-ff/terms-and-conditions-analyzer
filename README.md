@@ -11,6 +11,7 @@ An AI-powered tool to analyze and summarize legal documents like Terms of Servic
 * **Intuitive Risk Gauge:** Displays a single, color-coded risk level (Low, Moderate, High) for an immediate at-a-glance assessment of the document.
 * **Interactive Jargon Buster:** Automatically identifies common legal terms and provides definitions in a popover. Also includes a sidebar tool to look up any word using an online dictionary.
 * **Editable Configuration:** A dedicated tab allows users to modify the keywords and risk scores for the current session, providing full control over the analysis.
+* **Risk Scoring & Highlighting:** Flags clauses as Low, Medium, or High risk and highlights the trigger keywords.
 * **PDF Report Export:** Generates a clean, downloadable PDF report of the complete analysis.
 
 ---
@@ -21,7 +22,8 @@ Follow these steps to set up and run the project on your local machine.
 
 ### Dependencies
 
-This project requires the following Python libraries. The `requirements.txt` file in the next step will handle their installation.
+=======
+This project requires the following Python libraries. You can install them using the `requirements.txt` file provided in the next step.
 
 * `streamlit`
 * `pdfplumber`
@@ -30,7 +32,7 @@ This project requires the following Python libraries. The `requirements.txt` fil
 * `torch`
 * `nltk`
 * `requests`
-* `pandas`
+* `sentencepiece`
 
 ### Instructions
 
@@ -50,7 +52,7 @@ This project requires the following Python libraries. The `requirements.txt` fil
     torch
     nltk
     requests
-    pandas
+    sentencepiece
     ```
 
 3.  **Set Up a Virtual Environment (Recommended)**
@@ -74,3 +76,7 @@ This project requires the following Python libraries. The `requirements.txt` fil
     ```bash
     streamlit run app.py
     ```
+---
+## About This Project
+
+This project was developed in collaboration with Google's Gemini. The core logic, code, and debugging were achieved through a process of guided prompting, testing, and refinement.
