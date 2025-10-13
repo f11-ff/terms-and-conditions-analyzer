@@ -1,18 +1,16 @@
 # app.py
 
 """
-Streamlit frontend for Terms & Conditions Analyzer (v1.8).
-- Added a reload button in the Configuration tab to load changes from files.
-- Robust error handling for AI summaries.
+Streamlit frontend for Terms & Conditions Analyzer (v1.9 – Privacy Fix).
+- Removed the shared database and "Past Analyses" feature to ensure user privacy.
 """
 import io
 import json
 import re
-import sqlite3
-import pandas as pd
 from typing import Dict, Any, List
 import streamlit as st
 import requests
+import pandas as pd
 
 # Import from other project files
 from pipeline import process_document
@@ -46,7 +44,7 @@ CATEGORY_SETS = {
 # ---------------- Helper Functions ---------------- #
 def _extract_text_from_pdf(file_bytes: bytes) -> Dict[int, str]:
     if not pdfplumber:
-        st.error("`pdfplumber` is not installed. Please run `pip install pdfplumber`.")
+        st.error("`pdfplumber` is not installed. PDF processing is disabled.")
         return {}
     pages = {}
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
@@ -56,6 +54,7 @@ def _extract_text_from_pdf(file_bytes: bytes) -> Dict[int, str]:
                 pages[i] = text
     return pages
 
+# (Other helper functions like _highlight_triggers, get_online_definition, _format_analysis_for_pdf are unchanged)
 def _highlight_triggers(text: str, triggers: List[str]) -> str:
     sorted_triggers = sorted(triggers, key=len, reverse=True)
     for trigger in sorted_triggers:
@@ -111,12 +110,6 @@ def _format_analysis_for_pdf(result: Dict[str, Any]) -> bytes:
     buffer.close()
     return pdf_bytes
 
-def init_db():
-    conn = sqlite3.connect("analyses.db")
-    conn.execute("CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY, doc_type TEXT, summary_json TEXT)")
-    conn.commit()
-    return conn
-
 def display_risk_gauge(score: float):
     if score > 66:
         level, color, emoji = "High Risk", "#ff4b4b", "🚨"
@@ -135,6 +128,8 @@ def display_risk_gauge(score: float):
         unsafe_allow_html=True
     )
 
+# --- ❌ Database functions are now removed to ensure privacy ---
+
 # ---------------- UI ---------------- #
 st.set_page_config(page_title="Terms Analyzer", page_icon="⚖️", layout="wide")
 st.title("⚖️ Terms & Conditions Analyzer")
@@ -147,6 +142,7 @@ if 'risk_scores' not in st.session_state:
 with st.sidebar:
     st.header("Settings")
     selected_set = st.selectbox("Document Type", list(CATEGORY_SETS.keys()))
+    
     st.write("---")
     st.subheader("🔍 Word Lookup")
     word_to_define = st.text_input("Enter a word to define:")
@@ -157,15 +153,8 @@ with st.sidebar:
                 st.markdown(definition)
         else:
             st.warning("Please enter a word.")
-    st.write("---")
-    st.subheader("Past Analyses")
-    conn = init_db()
-    past = conn.execute("SELECT id, doc_type FROM documents ORDER BY id DESC").fetchall()
-    if past:
-        for doc_id, doc_type in past:
-            if st.button(f"Load {doc_type} #{doc_id}"):
-                row = conn.execute("SELECT summary_json FROM documents WHERE id=?", (doc_id,)).fetchone()
-                st.session_state["result"] = json.loads(row[0]) if row else None
+    
+    # --- ❌ "Past Analyses" section is removed from the sidebar ---
 
 st.header("📥 Input Document")
 pasted = st.text_area("Paste text here", height=250)
@@ -191,8 +180,7 @@ if run_btn:
             }
             data = process_document(text_pages, config)
             st.session_state["result"] = data
-            conn.execute("INSERT INTO documents (doc_type, summary_json) VALUES (?, ?)", (selected_set, json.dumps(data)))
-            conn.commit()
+            # --- ❌ The line that saved the analysis to the database is removed ---
 
 result = st.session_state.get("result")
 if result:
