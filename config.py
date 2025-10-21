@@ -1,39 +1,39 @@
 """
 Shared configuration for keywords and risk scores.
-Expanded to include Rental, Insurance, and Loan agreements.
+Expanded with synonyms and common legal phrases for better detection.
 """
 
 DEFAULT_KEYWORDS = {
     # --- Software ToS ---
-    "Data Collection": ["collect", "personal data", "information we collect", "analytic", "cookie"],
-    "Data Sharing": ["share", "third party", "affiliate", "advertis", "partner"],
-    "User Rights": ["access", "rectify", "delete", "opt-out", "withdraw consent"],
-    "Restrictions": ["not permit", "prohibit", "you agree not to", "misuse", "reverse engineer"],
-    "Termination": ["terminat", "suspend", "violation", "breach"],
-    "Refunds & Billing": ["refund", "charge", "billing", "payment", "subscription", "auto-renewal", "hidden fee"],
-    "Dispute Resolution": ["arbitrat", "class action", "waive", "governing law", "venue"],
-    "Liability & Warranty": ["warrant", "liab", "indemnify", "disclaim", "limit"],
-    "User Content Ownership": ["your content", "ownership", "grant license", "intellectual property", "upload"],
+    "Data Collection": ["collect", "personal data", "information we collect", "analytic", "cookie", "usage data", "telemetry"],
+    "Data Sharing": ["share", "third party", "affiliate", "advertis", "partner", "disclose"],
+    "User Rights": ["access", "rectify", "delete", "opt-out", "withdraw consent", "your rights", "data portability"],
+    "Restrictions": ["not permit", "prohibit", "you agree not to", "misuse", "reverse engineer", "unauthorized use"],
+    "Termination": ["terminat", "suspend", "cancel", "close account", "end this agreement", "violation", "breach"],
+    "Refunds & Billing": ["refund", "charge", "billing", "payment", "subscription", "auto-renewal", "hidden fee", "no refunds"],
+    "Dispute Resolution": ["arbitrat", "class action", "waive", "governing law", "venue", "dispute"],
+    "Liability & Warranty": ["warrant", "liab", "indemnify", "disclaim", "as is", "no warranty", "limit our liability"],
+    "User Content Ownership": ["your content", "ownership", "you grant", "license", "intellectual property", "upload"],
     "Third-party Integration": ["third-party", "integrate", "plugin", "external service"],
     "Security & Breach Responsibility": ["data breach", "unauthorized access", "security", "encrypt"],
     
     # --- Rental / Lease Agreement ---
-    "Lease Terms & Duration": ["lease term", "duration", "month-to-month", "fixed-term", "renewal"],
-    "Financials (Rent, Fees, Deposit)": ["rent", "due on", "late fee", "security deposit", "pet deposit", "non-refundable"],
-    "Responsibilities & Rules": ["maintenance", "repairs", "utilities", "tenant responsible", "landlord responsible", "sublet", "subleasing", "pets"],
-    "Lease Termination": ["early termination", "break lease", "notice period", "eviction"],
+    "Lease Terms & Duration": ["lease term", "duration", "month-to-month", "fixed-term", "renewal", "notice to vacate"],
+    "Financials (Rent, Fees, Deposit)": ["rent", "due on", "late fee", "security deposit", "pet deposit", "non-refundable", "additional charges"],
+    "Responsibilities & Rules": ["maintenance", "repairs", "utilities", "tenant responsible", "landlord responsible", "sublet", "subleasing", "pets", "alterations"],
+    "Lease Termination": ["early termination", "break lease", "notice period", "eviction", "abandonment"],
 
     # --- Insurance Policy ---
-    "Coverage & Limits": ["coverage", "covered loss", "limit of liability", "personal property", "dwelling"],
-    "Exclusions (What's Not Covered)": ["exclusion", "not cover", "wear and tear", "pre-existing condition", "act of god"],
-    "Premiums & Payments": ["premium", "deductible", "due date", "cancellation for non-payment"],
-    "Claims & Procedures": ["claim", "proof of loss", "notice", "deadline", "adjuster"],
+    "Coverage & Limits": ["coverage", "covered loss", "limit of liability", "personal property", "dwelling", "policy limit"],
+    "Exclusions (What's Not Covered)": ["exclusion", "not cover", "wear and tear", "pre-existing condition", "act of god", "we do not cover"],
+    "Premiums & Payments": ["premium", "deductible", "due date", "cancellation for non-payment", "grace period"],
+    "Claims & Procedures": ["claim", "proof of loss", "notice", "deadline", "adjuster", "filing a claim"],
 
     # --- Loan Agreement ---
     "Loan Terms (Principal, Interest)": ["principal amount", "interest rate", "apr", "annual percentage rate", "variable rate", "fixed rate"],
-    "Repayment Schedule": ["repayment", "monthly payment", "term of loan", "maturity date", "amortization"],
-    "Fees & Penalties": ["late payment", "prepayment penalty", "origination fee", "closing cost"],
-    "Collateral & Default": ["collateral", "security", "default", "acceleration", "lien", "repossession"],
+    "Repayment Schedule": ["repayment", "monthly payment", "term of loan", "maturity date", "amortization", "installments"],
+    "Fees & Penalties": ["late payment", "prepayment penalty", "origination fee", "closing cost", "additional fees"],
+    "Collateral & Default": ["collateral", "security", "default", "acceleration", "lien", "repossession", "failure to pay"],
 }
 
 RISK_SCORES = {
@@ -46,6 +46,7 @@ RISK_SCORES = {
     "prepayment penalty": 4, "variable rate": 3, "acceleration": 5, "default": 4,
     
     # --- Rights & Liability High-Risk ---
-    "limit": 2, "share": 1, "non-refundable": 4, "pre-existing condition": 4, "exclusion": 3,
-    "repossession": 5,
+    "limit our liability": 3, "share": 1, "non-refundable": 4, "pre-existing condition": 4, "exclusion": 3,
+    "repossession": 5, "as is": 3, "no warranty": 4,
 }
+
